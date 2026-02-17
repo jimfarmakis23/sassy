@@ -1,1 +1,98 @@
+name: Αυτόματη ενημέρωση links.txt από YouTube RSS
 
+on:
+  schedule:
+    - cron: '0 * * * *'  # Τρέχει κάθε λεπτό
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-links:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Κατέβασμα repository
+        uses: actions/checkout@v4
+
+      - name: Βρες το τελευταίο βίντεο από το RSS
+        id: get_video
+        run: |
+          CHANNEL_ID="UCMiJRAwDNSNzuYeN2uWa0pA"
+          RSS_URL="https://www.youtube.com/feeds/videos.xml?channel_id=${CHANNEL_ID}"
+          
+          echo "Διαβάζω το RSS από: $RSS_URL"
+          
+          # Κατέβασε το RSS και βγάλε το link του πρώτου (τελευταίου) βίντεο
+          RSS_CONTENT=$(curl -s "$RSS_URL")
+          
+          # Μέθοδος 1: Με grep (πιο απλή)
+          LATEST_URL=$(echo "$RSS_CONTENT" | grep -o 'https://www.youtube.com/watch?v=[^"]*' | head -1)
+          
+          # Μέθοδος 2: Με xml αν αποτύχει το grep
+          if [ -z "$LATEST_URL" ]; then
+            echo "⚠️  Το grep δεν βρήκε link, δοκιμάζω εναλλακτική..."
+            LATEST_URL=$(echo "$RSS_CONTENT" | grep -oP '(?<=<link rel="alternate" href=")[^"]+' | head -1)
+          fi
+          
+          # Μέθοδος 3: Αν ακόμα δεν βρήκε, δοκίμασε με awk
+          if [ -z "$LATEST_URL" ]; then
+            echo "⚠️  Δοκιμάζω με awk..."
+            LATEST_URL=$(echo "$RSS_CONTENT" | awk -F 'href="' '/<link rel="alternate"/ {print $2}' | awk -F '"' '{print $1}' | head -1)
+          fi
+          
+          if [ -z "$LATEST_URL" ]; then
+            echo "❌ Δεν βρέθηκε link στο RSS"
+            echo "Περιεχόμενο RSS για debugging:"
+            echo "$RSS_CONTENT" | head -20
+            exit 1
+          fi
+          
+          echo "✅ Τελευταίο βίντεο: $LATEST_URL"
+          echo "LATEST_URL=${LATEST_URL}" >> $GITHUB_OUTPUT
+
+      - name: Έλεγξε και ενημέρωσε το links.txt
+        env:
+          LATEST_LINK: ${{ steps.get_video.outputs.LATEST_URL }}
+        run: |
+          FILE="data/links.txt"
+          
+          # Δημιούργησε το φάκελο data αν δεν υπάρχει
+          mkdir -p data
+          
+          # Αν το αρχείο δεν υπάρχει, δημιούργησέ το
+          if [ ! -f "$FILE" ]; then
+            echo "📁 Δεν βρέθηκε αρχείο. Το δημιουργώ..."
+            echo "$LATEST_LINK" > "$FILE"
+            echo "✅ Δημιουργήθηκε με το τελευταίο link."
+            exit 0
+          fi
+          
+          # Διάβασε όλο το αρχείο
+          EXISTING_LINKS=$(cat "$FILE")
+          
+          # Έλεγξε αν το νέο link υπάρχει ΗΔΗ στο αρχείο
+          if echo "$EXISTING_LINKS" | grep -q "$LATEST_LINK"; then
+            echo "ℹ️  Το link υπάρχει ήδη στο αρχείο. Κανένα update."
+            exit 0
+          fi
+          
+          # Αν είναι νέο link, πρόσθεσέ το στην αρχή
+          echo "🎉 ΝΕΟ ΒΙΝΤΕΟ: $LATEST_LINK"
+          echo -e "$LATEST_LINK\n$EXISTING_LINKS" > "$FILE"
+          echo "✅ Το links.txt ενημερώθηκε!"
+
+      - name: Κάνε commit και push τις αλλαγές
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/links.txt
+          
+          # Κάνε commit μόνο αν υπάρχουν αλλαγές
+          if git diff --staged --quiet; then
+            echo "ℹ️  Χωρίς αλλαγές για commit."
+          else
+            git commit -m "Αυτόματο update: Νέο βίντεο στο κανάλι"
+            git push
+            echo "🚀 Οι αλλαγές ανέβηκαν στο GitHub!"
+          fi
