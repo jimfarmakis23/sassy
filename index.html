@@ -1,138 +1,269 @@
-<script>
-  function extractVideoId(url) {
-    try {
-      url = url.trim();
-      const patterns = [
-        // YouTube patterns
-        /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\n?#]+)/,
-        /youtube\.com\/watch\?.+&v=([^&\n?#]+)/,
-        // Invidious patterns (για κάθε περίπτωση)
-        /(?:invidious|yewtu\.be|inv\.)[^\/]+\/watch\?v=([^&\n?#]+)/,
-        /(?:invidious|yewtu\.be|inv\.)[^\/]+\/embed\/([^&\n?#]+)/
-      ];
-      for (let pattern of patterns) {
-        const match = url.match(pattern);
-        if (match) return match[1];
-      }
-      const urlObj = new URL(url);
-      return urlObj.searchParams.get('v');
-    } catch (e) {
-      console.error('Error parsing URL:', url, e);
-      return null;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes" />
+  <title>YouTube Videos - Dark Mode</title>
+
+  <!-- Speed up connection setup -->
+  <link rel="preconnect" href="https://www.youtube-nocookie.com">
+  <link rel="preconnect" href="https://www.youtube.com">
+  <link rel="preconnect" href="https://i.ytimg.com">
+  <link rel="dns-prefetch" href="https://www.youtube-nocookie.com">
+  <link rel="dns-prefetch" href="https://www.youtube.com">
+  <link rel="dns-prefetch" href="https://i.ytimg.com">
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background-color: #1a1a1a;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      min-height: 100vh;
+      padding: 20px;
     }
-  }
 
-  // 🎯 ΜΟΝΟ το yewtu.be - σταθερό και δοκιμασμένο
-  const EMBED_BASE = "https://yewtu.be/embed/";
-
-  function buildEmbedSrc(videoId) {
-    return `${EMBED_BASE}${videoId}`;
-  }
-
-  const titleCache = new Map();
-  async function fetchTitle(videoId) {
-    if (titleCache.has(videoId)) return titleCache.get(videoId);
-
-    const oembedUrl =
-      `https://www.youtube.com/oembed?url=${encodeURIComponent("https://www.youtube.com/watch?v=" + videoId)}&format=json`;
-
-    try {
-      const res = await fetch(oembedUrl);
-      if (!res.ok) throw new Error("oEmbed failed");
-      const data = await res.json();
-      const title = (data && data.title) ? data.title : "YouTube Video";
-      titleCache.set(videoId, title);
-      return title;
-    } catch (e) {
-      console.warn("Title fetch failed for", videoId, e);
-      const fallback = "YouTube Video";
-      titleCache.set(videoId, fallback);
-      return fallback;
+    h1 {
+      color: #ffffff;
+      text-align: center;
+      margin-bottom: 26px;
+      font-size: clamp(1.5rem, 5vw, 2.5rem);
+      font-weight: 400;
+      letter-spacing: 1px;
     }
-  }
 
-  fetch('./data/links.txt')
-    .then(response => {
-      if (!response.ok) {
-        throw new Error(`Το αρχείο data/links.txt δεν βρέθηκε (Status: ${response.status})`);
-      }
-      return response.text();
-    })
-    .then(text => {
-      const container = document.getElementById('video-container');
-      container.innerHTML = '';
+    #video-container {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 22px;
+      max-width: 1680px;
+      margin: 0 auto;
+    }
 
-      const links = text.split('\n')
-        .map(line => line.trim())
-        .filter(line => line && !line.startsWith('#'));
+    .video-card {
+      background-color: #2d2d2d;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .video-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 8px 12px rgba(0,0,0,0.4);
+    }
 
-      if (links.length === 0) {
-        container.innerHTML = '<div class="error-message">Δεν βρέθηκαν links στο αρχείο</div>';
-        return;
-      }
+    /* ✅ 16:10 (όπως ήταν πριν) */
+    .video-media {
+      position: relative;
+      width: 100%;
+      padding-bottom: 62.5%; /* 10/16 = 0.625 */
+      background: #000;
+    }
+    .video-media iframe {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      border: none;
+      background: #000;
+    }
 
-      const iframes = [];
+    .video-title {
+      color: #fff;
+      padding: 10px 12px 12px;
+      font-size: 0.95rem;
+      line-height: 1.25rem;
+      font-weight: 400;
+      opacity: 0.95;
 
-      links.forEach((link, idx) => {
-        const videoId = extractVideoId(link);
-        if (!videoId || videoId.length !== 11) return;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      min-height: calc(1.25rem * 2);
+    }
 
-        const card = document.createElement('div');
-        card.className = 'video-card';
+    .loading, .error-message {
+      grid-column: 1 / -1;
+      text-align: center;
+      padding: 40px;
+      color: #ffffff;
+      background-color: #2d2d2d;
+      border-radius: 12px;
+      font-size: 1.1rem;
+    }
+    .error-message {
+      color: #ff6b6b;
+      border: 1px solid #ff6b6b;
+    }
 
-        const media = document.createElement('div');
-        media.className = 'video-media';
+    @media screen and (max-width: 1024px) {
+      #video-container { grid-template-columns: repeat(2, 1fr); gap: 14px; }
+    }
 
-        const iframe = document.createElement('iframe');
-        // 🎯 ΕΔΩ: ΟΛΑ τα links γίνονται embed από yewtu.be
-        iframe.src = buildEmbedSrc(videoId);
-        iframe.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture";
-        iframe.allowFullscreen = true;
+    @media screen and (max-width: 480px) {
+      body { padding: 10px; }
+      #video-container { grid-template-columns: 1fr; gap: 15px; }
+      h1 { margin-bottom: 18px; }
+    }
 
-        iframe.loading = "lazy";
-        iframe.referrerPolicy = "strict-origin-when-cross-origin";
-        iframe.title = "YouTube video player";
+    ::-webkit-scrollbar { width: 12px; height: 12px; }
+    ::-webkit-scrollbar-track { background: #2d2d2d; }
+    ::-webkit-scrollbar-thumb { background: #666; border-radius: 6px; }
+    ::-webkit-scrollbar-thumb:hover { background: #888; }
+  </style>
+</head>
 
-        media.appendChild(iframe);
+<body>
+  <h1>YouTube Videos</h1>
 
-        const title = document.createElement('div');
-        title.className = 'video-title';
-        title.id = `title-${idx}`;
-        title.textContent = '...';
+  <div id="video-container">
+    <div class="loading">Φόρτωση βίντεο...</div>
+  </div>
 
-        card.appendChild(media);
-        card.appendChild(title);
-        container.appendChild(card);
-
-        iframes.push({ iframe, videoId, titleEl: title });
-      });
-
-      for (let i = 0; i < Math.min(3, iframes.length); i++) {
-        iframes[i].iframe.loading = "eager";
-      }
-
-      let titleIdx = 0;
-      function pumpTitles() {
-        const batch = 6;
-        const end = Math.min(titleIdx + batch, iframes.length);
-        for (; titleIdx < end; titleIdx++) {
-          const item = iframes[titleIdx];
-          fetchTitle(item.videoId).then(t => item.titleEl.textContent = t);
+  <script>
+    function getVideoId(url) {
+      try {
+        url = url.trim();
+        const patterns = [
+          /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\n?#]+)/,
+          /youtube\.com\/watch\?.+&v=([^&\n?#]+)/
+        ];
+        for (let pattern of patterns) {
+          const match = url.match(pattern);
+          if (match) return match[1];
         }
-        if (titleIdx < iframes.length) setTimeout(pumpTitles, 250);
+        const urlObj = new URL(url);
+        return urlObj.searchParams.get('v');
+      } catch (e) {
+        console.error('Error parsing URL:', url, e);
+        return null;
       }
-      pumpTitles();
-    })
-    .catch(error => {
-      console.error(error);
-      document.getElementById('video-container').innerHTML =
-        `<div class="error-message">
-            ❌ Σφάλμα: ${error.message}<br><br>
-            Βεβαιώσου ότι:<br>
-            1. Το αρχείο <b>data/links.txt</b> υπάρχει στο repository<br>
-            2. Το <b>index.html</b> είναι στο root (ή στο Pages root)<br>
-            3. Τα links είναι σωστά (ένα σε κάθε γραμμή)<br><br>
-            Tip: άνοιξε DevTools → Console για να δεις το ακριβές error.
-         </div>`;
-    });
-</script>
+    }
+
+    const EMBED_BASE = "https://www.youtube-nocookie.com/embed/";
+
+    // autoplay=0 για να μη “καίει” bandwidth/CPU χωρίς λόγο
+    function buildEmbedSrc(videoId) {
+      const params = new URLSearchParams({
+        autoplay: "0",
+        rel: "0",
+        modestbranding: "1",
+        playsinline: "1"
+      });
+      return `${EMBED_BASE}${videoId}?${params.toString()}`;
+    }
+
+    // Titles (oEmbed)
+    const titleCache = new Map();
+    async function fetchTitle(videoId) {
+      if (titleCache.has(videoId)) return titleCache.get(videoId);
+
+      const oembedUrl =
+        `https://www.youtube.com/oembed?url=${encodeURIComponent("https://www.youtube.com/watch?v=" + videoId)}&format=json`;
+
+      try {
+        const res = await fetch(oembedUrl);
+        if (!res.ok) throw new Error("oEmbed failed");
+        const data = await res.json();
+        const title = (data && data.title) ? data.title : "YouTube Video";
+        titleCache.set(videoId, title);
+        return title;
+      } catch (e) {
+        console.warn("Title fetch failed for", videoId, e);
+        const fallback = "YouTube Video";
+        titleCache.set(videoId, fallback);
+        return fallback;
+      }
+    }
+
+    // GitHub Pages σε repo subfolder: το ./ βοηθάει
+    fetch('./data/links.txt')
+      .then(response => {
+        if (!response.ok) {
+          throw new Error(`Το αρχείο data/links.txt δεν βρέθηκε (Status: ${response.status})`);
+        }
+        return response.text();
+      })
+      .then(text => {
+        const container = document.getElementById('video-container');
+        container.innerHTML = '';
+
+        const links = text.split('\n')
+          .map(line => line.trim())
+          .filter(line => line && !line.startsWith('#'));
+
+        if (links.length === 0) {
+          container.innerHTML = '<div class="error-message">Δεν βρέθηκαν links στο αρχείο</div>';
+          return;
+        }
+
+        const iframes = [];
+
+        links.forEach((link, idx) => {
+          const videoId = getVideoId(link);
+          if (!videoId || videoId.length !== 11) return;
+
+          const card = document.createElement('div');
+          card.className = 'video-card';
+
+          const media = document.createElement('div');
+          media.className = 'video-media';
+
+          const iframe = document.createElement('iframe');
+          iframe.src = buildEmbedSrc(videoId);
+          iframe.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture";
+          iframe.allowFullscreen = true;
+
+          // Browser-native lazy load για να μην “μπουκώσει”
+          iframe.loading = "lazy";
+          iframe.referrerPolicy = "strict-origin-when-cross-origin";
+          iframe.title = "YouTube video player";
+
+          media.appendChild(iframe);
+
+          const title = document.createElement('div');
+          title.className = 'video-title';
+          title.id = `title-${idx}`;
+          title.textContent = '...';
+
+          card.appendChild(media);
+          card.appendChild(title);
+          container.appendChild(card);
+
+          iframes.push({ iframe, videoId, titleEl: title });
+        });
+
+        // Eager για τα πρώτα 3 ώστε να φαίνεται άμεσο
+        for (let i = 0; i < Math.min(3, iframes.length); i++) {
+          iframes[i].iframe.loading = "eager";
+        }
+
+        // Titles: “ήπια” φόρτωση (batch)
+        let titleIdx = 0;
+        function pumpTitles() {
+          const batch = 6;
+          const end = Math.min(titleIdx + batch, iframes.length);
+          for (; titleIdx < end; titleIdx++) {
+            const item = iframes[titleIdx];
+            fetchTitle(item.videoId).then(t => item.titleEl.textContent = t);
+          }
+          if (titleIdx < iframes.length) setTimeout(pumpTitles, 250);
+        }
+        pumpTitles();
+      })
+      .catch(error => {
+        console.error(error);
+        document.getElementById('video-container').innerHTML =
+          `<div class="error-message">
+              ❌ Σφάλμα: ${error.message}<br><br>
+              Βεβαιώσου ότι:<br>
+              1. Το αρχείο <b>data/links.txt</b> υπάρχει στο repository<br>
+              2. Το <b>index.html</b> είναι στο root (ή στο Pages root)<br>
+              3. Τα links είναι σωστά (ένα σε κάθε γραμμή)<br><br>
+              Tip: άνοιξε DevTools → Console για να δεις το ακριβές error.
+           </div>`;
+      });
+  </script>
+</body>
+</html>
